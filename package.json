@@ -1,0 +1,27 @@
+{
+  "name": "@yuzhao163/travel-assistant-cli",
+  "version": "1.0.0",
+  "description": "Travel Assistant CLI - 美团旅行 API 命令行工具，支持酒店、景点、火车票、行程规划",
+  "main": "travel",
+  "bin": {
+    "travel": "./travel"
+  },
+  "scripts": {
+    "postinstall": "chmod +x travel"
+  },
+  "keywords": ["travel", "hotel", "meituan", "cli"],
+  "author": "Yuzhao163",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yuzhao163/travel-assistant-cli"
+  },
+  "homepage": "https://github.com/Yuzhao163/travel-assistant-cli#readme",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

@@ -2,18 +2,28 @@
 
 美团旅行 API 命令行工具，支持酒店推荐、景点查询、火车票查询、行程规划。
 
-## 功能
-
-| 功能 | 说明 |
-|------|------|
-| 酒店推荐 | 按城市/区域/星级搜索酒店 |
-| 景点推荐 | 热门景点查询 |
-| 火车票 | 高铁/动车查询 |
-| 行程规划 | 自由行/亲子游/CityWalk 等 |
-
 ## 安装
 
-### 方式一：一键安装
+### 方式一：npm 一键安装（推荐）
+
+```bash
+npm install -g @yuzhao163/travel-assistant-cli
+```
+
+### 方式二：GitHub Packages（需要 token）
+
+```bash
+# 设置 registry
+npm config set registry https://npm.pkg.github.com
+
+# 登录（需要 GitHub Personal Access Token，scope 选 repo）
+npm login --registry https://npm.pkg.github.com
+
+# 安装
+npm install -g @yuzhao163/travel-assistant-cli
+```
+
+### 方式三：Git 克隆
 
 ```bash
 git clone https://github.com/Yuzhao163/travel-assistant-cli.git
@@ -22,21 +32,15 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### 方式二：手动安装
+## 更新
 
 ```bash
-# 复制脚本到 PATH
-cp travel ~/.local/bin/travel
-chmod +x ~/.local/bin/travel
+# npm 方式
+npm update -g @yuzhao163/travel-assistant-cli
 
-# 确保 ~/.local/bin 在 PATH 中
-export PATH="$HOME/.local/bin:$PATH"
+# 或手动
+npm install -g @yuzhao163/travel-assistant-cli@latest
 ```
-
-## 依赖
-
-- Python 3.7+
-- urllib（标准库，无需安装）
 
 ## 使用方法
 
@@ -49,19 +53,19 @@ travel -c 三亚 -q "海棠湾海景酒店推荐"
 # 景点查询
 travel -c 北京 -q "故宫门票多少钱"
 travel -c 北京 -q "北京必去景点推荐"
-travel -c 杭州 -q "西湖附近景点"
 
 # 火车票查询
 travel -c 北京 -q "北京到上海高铁"
-travel -c 上海 -q "上海到杭州高铁推荐"
 
 # 行程规划
-travel -c 昆明 -q "昆明7日游行程规划"
+travel -c 昆明 -q "3日游攻略"
 travel -c 北京 -q "北京5日亲子游推荐"
-travel -c 天津 -q "天津两日游攻略"
 
-# 输出原始 JSON（便于程序处理）
+# 输出原始 JSON
 travel -c 北京 -q "天安门附近酒店" --json
+
+# 查看帮助
+travel --help
 ```
 
 ## 常用城市 ID
@@ -76,20 +80,22 @@ travel -c 北京 -q "天安门附近酒店" --json
 | 石家庄 | 130100 | 昆明 | 530100 |
 | 三亚 | 460200 | 大理 | 532900 |
 
-其他城市会自动识别，无需传入 cityId。
+城市 ID 可不传，CLI 会自动识别常用城市。
 
-## 完整帮助
+## 版本管理
 
-```bash
-travel --help
-```
-
-## 更新 CLI
+发布新版本：
 
 ```bash
-cd travel-assistant-cli
-git pull
-./install.sh
+# 1. 更新版本号
+npm version patch  # 1.0.0 -> 1.0.1
+npm version minor  # 1.0.0 -> 1.1.0
+npm version major  # 1.0.0 -> 2.0.0
+
+# 2. 推送 tag
+git push origin v1.0.1
+
+# GitHub Actions 自动发布到 GitHub Packages
 ```
 
 ## 项目地址
