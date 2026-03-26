@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""
+Travel Assistant CLI
+美团旅行 API 命令行工具
+用法: travel [选项] --city 城市 --query 查询内容
+"""
+
+import argparse
+import json
+import sys
+import urllib.request
+import urllib.parse
+import os
+
+
+API_BASE = "http://10.101.44.33:8080/v1/api/voyage/openapi/query"
+AUTH_TOKEN = "ea323f90040ee30b688d9c6d55ad1ee3"
+
+
+# 常用城市ID映射
+CITY_IDS = {
+    "北京": 110100, "上海": 310100, "杭州": 330100,
+    "广州": 440100, "深圳": 440300, "成都": 510100,
+    "南京": 320100, "西安": 610100, "重庆": 500100,
+    "天津": 120100, "石家庄": 130100, "昆明": 530100,
+    "武汉": 420100, "厦门": 350200, "苏州": 320500,
+    "青岛": 370200, "长沙": 430100, "哈尔滨": 230100,
+    "沈阳": 210100, "大连": 210200, "济南": 370100,
+    "郑州": 410100, "南昌": 360100, "合肥": 340100,
+    "三亚": 460200, "海口": 460100, "大理": 532900,
+    "丽江": 530700, "桂林": 450300, "苏州": 320500,
+}
+
+
+def query(city: str, city_id: int, query_text: str) -> dict:
+    payload = {
+        "xtDebugCellName": "gray-release-hotel-ptest",
+        "userId": 214900659,
+        "city": city,
+        "cityId": city_id,
+        "query": query_text,
+    }
+    headers = {
+        "Authorization": AUTH_TOKEN,
+        "Content-Type": "application/json",
+    }
+    req = urllib.request.Request(
+        API_BASE,
+        data=json.dumps(payload).encode(),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        return {"code": -1, "msg": str(e)}
+
+
+def format_output(data: dict) -> str:
+    """解析 API 返回，输出纯文本内容"""
+    if data.get("code") != 0:
+        msg = data.get("msg", "未知错误")
+        return f"❌ 错误: {msg}"
+    content = data.get("data", "")
+    if not content:
+        return "⚠️ 未返回数据"
+    return content
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="travel",
+        description="旅行助手 CLI - 酒店、景点、行程、火车票查询",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+城市ID参考:
+  北京 110100 | 上海 310100 | 杭州 330100 | 广州 440100
+  深圳 440300 | 成都 510100 | 南京 320100 | 重庆 500100
+  西安 610100 | 天津 120100 | 石家庄 130100 | 昆明 530100
+  三亚 460200 | 大理 532900 | 丽江 530700 | 桂林 450300
+
+示例:
+  travel --city 北京 --query "天安门附近酒店"
+  travel --city 上海 --query "外滩五星级酒店推荐"
+  travel --city 昆明 --query "3日游行程规划"
+  travel --city 北京 --query "北京到上海高铁"
+  travel --city 北京 --query "故宫门票多少钱"
+  travel --city 北京 --query "北京必去景点推荐"
+  travel --city 石家庄 --query "石家庄亲子游推荐"
+  travel --json --city 北京 --query "天安门附近酒店"
+        """,
+    )
+    parser.add_argument("--city", "-c", required=True, help="目标城市")
+    parser.add_argument("--city-id", type=int, default=None, help="城市 ID（可选）")
+    parser.add_argument("--query", "-q", required=True, help="查询内容")
+    parser.add_argument(
+        "--json", "-j", action="store_true", help="输出原始 JSON"
+    )
+
+    args = parser.parse_args()
+
+    city_id = args.city_id or CITY_IDS.get(args.city)
+
+    print(f"🔍 查询中: {args.city} - {args.query}", file=sys.stderr)
+
+    result = query(args.city, city_id, args.query)
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(format_output(result))
+
+
+if __name__ == "__main__":
+    main()
