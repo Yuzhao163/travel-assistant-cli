@@ -7,15 +7,14 @@ Travel Assistant CLI
 
 import argparse
 import json
+import re
 import sys
 import urllib.request
 import urllib.parse
-import os
 
 
 API_BASE = "http://10.101.44.33:8080/v1/api/voyage/openapi/query"
 AUTH_TOKEN = "ea323f90040ee30b688d9c6d55ad1ee3"
-
 
 # 常用城市ID映射
 CITY_IDS = {
@@ -28,8 +27,277 @@ CITY_IDS = {
     "沈阳": 210100, "大连": 210200, "济南": 370100,
     "郑州": 410100, "南昌": 360100, "合肥": 340100,
     "三亚": 460200, "海口": 460100, "大理": 532900,
-    "丽江": 530700, "桂林": 450300, "苏州": 320500,
+    "丽江": 530700, "桂林": 450300,
 }
+
+# 查询类型识别关键词
+ITINERARY_KEYWORDS = ["行程", "攻略", "几日游", "几天", "旅游路线", "安排"]
+ATTRACTION_KEYWORDS = ["景点", "必去", "推荐景点", "好去处", "观光"]
+HOTEL_KEYWORDS = ["酒店", "民宿", "住宿", "旅馆"]
+FOOD_KEYWORDS = ["美食", "餐厅", "必吃", "小吃", "推荐吃的", "特色菜"]
+TICKET_KEYWORDS = ["门票", "票价", "多少钱"]
+
+
+def classify_query(query_text: str) -> str:
+    """根据 query 文本识别查询类型"""
+    for kw in ITINERARY_KEYWORDS:
+        if kw in query_text:
+            return "itinerary"
+    for kw in FOOD_KEYWORDS:
+        if kw in query_text:
+            return "food"
+    for kw in HOTEL_KEYWORDS:
+        if kw in query_text:
+            return "hotel"
+    for kw in ATTRACTION_KEYWORDS:
+        if kw in query_text:
+            return "attraction"
+    for kw in TICKET_KEYWORDS:
+        if kw in query_text:
+            return "ticket"
+    return "general"
+
+
+def wrap_link(name: str, raw_url: str) -> str:
+    """将美团/大众点评链接包装为跳转链接"""
+    if not raw_url:
+        return name
+    url = raw_url.strip()
+    if url.startswith("imeituan://"):
+        encoded = urllib.parse.quote(url, safe="")
+        return f"[{name}](https://trip-button-action.mynocode.host/#/?redirect={encoded})"
+    if "dianping.com" in url and "url=" in url:
+        try:
+            parsed = urllib.parse.urlparse(url)
+            params = urllib.parse.parse_qs(parsed.query)
+            if "url" in params:
+                imeituan = urllib.parse.unquote(params["url"][0])
+                encoded = urllib.parse.quote(imeituan, safe="")
+                return f"[{name}](https://trip-button-action.mynocode.host/#/?redirect={encoded})"
+        except Exception:
+            pass
+    return name
+
+
+def process_links_in_text(text: str) -> str:
+    """处理文本中所有美团/点评链接，替换为 Markdown 链接格式"""
+    # 匹配 [名称](url) 格式
+    def replace_link(match):
+        name = match.group(1).strip()
+        url = match.group(2).strip()
+        return wrap_link(name, url)
+
+    # 处理 Markdown 链接格式 [text](url)
+    text = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', replace_link, text)
+    return text
+
+
+def format_itinerary(content: str, city: str) -> str:
+    """格式化行程规划输出"""
+    lines = content.split("\n")
+    output = []
+    in_day = False
+    prev_empty = True
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            prev_empty = True
+            output.append("")
+            continue
+
+        # 标题行（如 "📝 DAY1：..." 或 "📝 Day 1"）
+        if re.match(r"^📝\s*DAY", stripped, re.IGNORECASE) or \
+           re.match(r"^DAY", stripped, re.IGNORECASE):
+            if not prev_empty:
+                output.append("")
+            output.append(f"\n{stripped}")
+            prev_empty = False
+            in_day = True
+            continue
+
+        # 景点/活动行（以 · 或 - 开头）
+        if (stripped.startswith("·") or stripped.startswith("-") or \
+            stripped.startswith("*")) and in_day:
+            output.append(f"  {stripped}")
+            prev_empty = False
+            continue
+
+        # 景点名称 + 描述（独立成行的景点行）
+        if re.match(r"^[\u4e00-\u9fa5]{2,10}(\s|$)", stripped) and \
+           len(stripped) < 50 and not prev_empty:
+            output.append(f"  {stripped}")
+            prev_empty = False
+            continue
+
+        # 普通段落
+        if prev_empty and len(stripped) > 5:
+            output.append(f"\n{stripped}")
+        else:
+            output.append(stripped)
+        prev_empty = False
+
+    result = "\n".join(output)
+    result = process_links_in_text(result)
+    return result.strip()
+
+
+def format_attraction(content: str) -> str:
+    """格式化景点推荐输出"""
+    lines = content.split("\n")
+    output = []
+    prev_empty = True
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            prev_empty = True
+            continue
+
+        # 链接行：[景点名](url)
+        link_match = re.match(r"\[([^\]]+)\]\((https?://[^\)]+)\)", stripped)
+        if link_match:
+            name = link_match.group(1).strip()
+            url = link_match.group(2).strip()
+            wrapped = wrap_link(name, url)
+            output.append(f"  {wrapped}")
+            prev_empty = False
+            continue
+
+        # 评分行（包含 ⭐ 或 评分）
+        if "⭐" in stripped or "评分" in stripped:
+            output.append(f"  {stripped}")
+            prev_empty = False
+            continue
+
+        # 简介行
+        if len(stripped) > 10 and prev_empty:
+            output.append(f"\n{stripped}")
+            prev_empty = False
+            continue
+
+        # 小贴士
+        if "小贴士" in stripped or "贴士" in stripped:
+            output.append(f"\n{stripped}")
+            prev_empty = True
+            continue
+
+        output.append(f"  {stripped}")
+        prev_empty = False
+
+    result = "\n".join(output)
+    result = process_links_in_text(result)
+    return result.strip()
+
+
+def format_hotel(content: str) -> str:
+    """格式化酒店推荐输出"""
+    lines = content.split("\n")
+    output = []
+    prev_empty = True
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            prev_empty = True
+            continue
+
+        # 方案/推荐行
+        if stripped.startswith("方案") or stripped.startswith("推荐") or \
+           stripped.startswith("酒店"):
+            output.append(f"\n{stripped}")
+            prev_empty = False
+            continue
+
+        # 链接行
+        link_match = re.match(r"\[([^\]]+)\]\((https?://[^\)]+)\)", stripped)
+        if link_match:
+            name = link_match.group(1).strip()
+            url = link_match.group(2).strip()
+            wrapped = wrap_link(name, url)
+            output.append(f"  {wrapped}")
+            prev_empty = False
+            continue
+
+        # 详情行
+        if "评分" in stripped or "价格" in stripped or "起" in stripped or \
+           "星级" in stripped or "距离" in stripped:
+            output.append(f"  {stripped}")
+            prev_empty = False
+            continue
+
+        # 分割线/小贴士
+        if "小贴士" in stripped or "---" in stripped:
+            output.append(f"\n{stripped}")
+            prev_empty = True
+            continue
+
+        if len(stripped) > 5:
+            output.append(f"  {stripped}")
+        prev_empty = False
+
+    result = "\n".join(output)
+    result = process_links_in_text(result)
+    return result.strip()
+
+
+def format_food(content: str) -> str:
+    """格式化美食推荐输出"""
+    lines = content.split("\n")
+    output = []
+    prev_empty = True
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            prev_empty = True
+            continue
+
+        # 链接行
+        link_match = re.match(r"\[([^\]]+)\]\((https?://[^\)]+)\)", stripped)
+        if link_match:
+            name = link_match.group(1).strip()
+            url = link_match.group(2).strip()
+            wrapped = wrap_link(name, url)
+            output.append(f"  {wrapped}")
+            prev_empty = False
+            continue
+
+        # 分割线/小贴士
+        if "小贴士" in stripped or "---" in stripped:
+            output.append(f"\n{stripped}")
+            prev_empty = True
+            continue
+
+        if len(stripped) > 5:
+            output.append(f"  {stripped}")
+        prev_empty = False
+
+    result = "\n".join(output)
+    result = process_links_in_text(result)
+    return result.strip()
+
+
+def format_general(content: str) -> str:
+    """通用格式化：处理链接 + 清理"""
+    result = process_links_in_text(content)
+    return result.strip()
+
+
+def format_output(content: str, query_text: str) -> str:
+    """根据 query 类型自动选择格式化器"""
+    qtype = classify_query(query_text)
+
+    if qtype == "itinerary":
+        return format_itinerary(content, "")
+    elif qtype == "hotel":
+        return format_hotel(content)
+    elif qtype == "food":
+        return format_food(content)
+    elif qtype == "attraction":
+        return format_attraction(content)
+    else:
+        return format_general(content)
 
 
 def query(city: str, city_id: int, query_text: str) -> dict:
@@ -51,21 +319,10 @@ def query(city: str, city_id: int, query_text: str) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
         return {"code": -1, "msg": str(e)}
-
-
-def format_output(data: dict) -> str:
-    """解析 API 返回，输出纯文本内容"""
-    if data.get("code") != 0:
-        msg = data.get("msg", "未知错误")
-        return f"❌ 错误: {msg}"
-    content = data.get("data", "")
-    if not content:
-        return "⚠️ 未返回数据"
-    return content
 
 
 def main():
@@ -88,6 +345,7 @@ def main():
   travel --city 北京 --query "故宫门票多少钱"
   travel --city 北京 --query "北京必去景点推荐"
   travel --city 石家庄 --query "石家庄亲子游推荐"
+  travel --city 丽江 --query "丽江必吃美食餐厅推荐"
   travel --json --city 北京 --query "天安门附近酒店"
         """,
     )
@@ -99,7 +357,6 @@ def main():
     )
 
     args = parser.parse_args()
-
     city_id = args.city_id or CITY_IDS.get(args.city)
 
     print(f"🔍 查询中: {args.city} - {args.query}", file=sys.stderr)
@@ -108,7 +365,15 @@ def main():
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        print(format_output(result))
+        if result.get("code") != 0:
+            print(f"❌ 错误: {result.get('msg', '未知错误')}", file=sys.stderr)
+            sys.exit(1)
+        content = result.get("data", "")
+        if not content:
+            print("⚠️ 未返回数据", file=sys.stderr)
+            sys.exit(1)
+        formatted = format_output(content, args.query)
+        print(formatted)
 
 
 if __name__ == "__main__":
