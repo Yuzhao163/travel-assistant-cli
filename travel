@@ -13,7 +13,7 @@ import urllib.request
 import urllib.parse
 
 
-API_BASE = "http://10.101.44.33:8080/v1/api/voyage/openapi/query"
+API_BASE = "http://10.171.29.100:8080/v1/api/voyage/openapi/query"
 AUTH_TOKEN = "ea323f90040ee30b688d9c6d55ad1ee3"
 
 # 常用城市ID映射
