@@ -13,7 +13,7 @@ import urllib.request
 import urllib.parse
 
 
-API_BASE = "http://10.171.29.100:8080/v1/api/voyage/openapi/query"
+API_BASE = "http://10.101.184.151:8080/v1/api/voyage/openapi/query"
 AUTH_TOKEN = "ea323f90040ee30b688d9c6d55ad1ee3"
 
 # 常用城市ID映射
@@ -302,7 +302,7 @@ def format_output(content: str, query_text: str) -> str:
 
 def query(city: str, city_id: int, query_text: str) -> dict:
     payload = {
-        "xtDebugCellName": "gray-release-hotel-ptest",
+        "xtDebugCellName": "gray-release-hotel-ai-distill",
         "userId": 214900659,
         "city": city,
         "cityId": city_id,
