@@ -50,7 +50,7 @@ echo "✅ pip3 已安装"
 # 安装依赖
 echo ""
 echo "📦 安装 Python 依赖..."
-pip3 install requests urllib3 --quiet 2>/dev/null || pip3 install requests urllib3
+pip3 install requests urllib3 --break-system-packages 2>/dev/null || pip3 install requests urllib3
 echo "✅ 依赖安装完成"
 
 # 下载 travel 脚本和 SKILL.md
