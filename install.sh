@@ -53,17 +53,22 @@ echo "📦 安装 Python 依赖..."
 pip3 install requests urllib3 --quiet 2>/dev/null || pip3 install requests urllib3
 echo "✅ 依赖安装完成"
 
-# 下载 travel 脚本
+# 下载 travel 脚本和 SKILL.md
 echo ""
 echo "📥 下载 travel CLI..."
 curl -sSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/travel" -o "${TEMP_DIR}/travel"
 chmod +x "${TEMP_DIR}/travel"
 
+echo "📥 下载 SKILL.md..."
+curl -sSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/SKILL.md" -o "${TEMP_DIR}/SKILL.md"
+
 # 创建安装目录
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$HOME/.openclaw/skills/travel-assistant"
 
 # 复制脚本
 cp "${TEMP_DIR}/travel" "${INSTALL_DIR}/travel"
+cp "${TEMP_DIR}/SKILL.md" "$HOME/.openclaw/skills/travel-assistant/SKILL.md"
 
 # 清理
 rm -rf "$TEMP_DIR"

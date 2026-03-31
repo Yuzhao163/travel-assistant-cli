@@ -2,11 +2,16 @@
 """
 Travel Assistant CLI
 美团旅行 API 命令行工具
-用法: travel [选项] --city 城市 --query 查询内容
+用法:
+  travel -c 城市 -q "查询内容"   # 查询
+  travel token set <token>       # 设置 Token
+  travel token show              # 查看当前 Token
+  travel token clear             # 清除 Token
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -14,9 +19,44 @@ import urllib.parse
 
 
 API_BASE = "http://zhaoyuehui02-tbpwk-sl-mcp.open.cater.sjst.test.sankuai.com/v1/api/voyage/openapi/query"
-AUTH_TOKEN = "ea323f90040ee30b688d9c6d55ad1ee3"
+TOKEN_URL = "https://developer.sjst.st.sankuai.com/zh/v2/dev/token"
 
-# 常用城市ID映射
+# Token 存储路径（固定在 skill 目录下）
+TOKEN_FILE = os.path.expanduser("~/.openclaw/skills/travel-assistant/token.json")
+
+
+# =====================
+# Token 管理
+# =====================
+
+def load_token() -> str | None:
+    """从本地文件加载 Token，不存在则返回 None"""
+    if not os.path.exists(TOKEN_FILE):
+        return None
+    try:
+        with open(TOKEN_FILE, "r") as f:
+            data = json.load(f)
+            return data.get("token", "").strip() or None
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def save_token(token: str) -> None:
+    """保存 Token 到本地文件"""
+    with open(TOKEN_FILE, "w") as f:
+        json.dump({"token": token.strip()}, f)
+
+
+def clear_token() -> None:
+    """清除本地存储的 Token"""
+    if os.path.exists(TOKEN_FILE):
+        os.remove(TOKEN_FILE)
+
+
+# =====================
+# 城市 ID 映射
+# =====================
+
 CITY_IDS = {
     "北京": 110100, "上海": 310100, "杭州": 330100,
     "广州": 440100, "深圳": 440300, "成都": 510100,
@@ -30,7 +70,11 @@ CITY_IDS = {
     "丽江": 530700, "桂林": 450300,
 }
 
-# 查询类型识别关键词
+
+# =====================
+# 查询类型识别
+# =====================
+
 ITINERARY_KEYWORDS = ["行程", "攻略", "几日游", "几天", "旅游路线", "安排"]
 ATTRACTION_KEYWORDS = ["景点", "必去", "推荐景点", "好去处", "观光"]
 HOTEL_KEYWORDS = ["酒店", "民宿", "住宿", "旅馆"]
@@ -39,27 +83,24 @@ TICKET_KEYWORDS = ["门票", "票价", "多少钱"]
 
 
 def classify_query(query_text: str) -> str:
-    """根据 query 文本识别查询类型"""
-    for kw in ITINERARY_KEYWORDS:
-        if kw in query_text:
-            return "itinerary"
-    for kw in FOOD_KEYWORDS:
-        if kw in query_text:
-            return "food"
-    for kw in HOTEL_KEYWORDS:
-        if kw in query_text:
-            return "hotel"
-    for kw in ATTRACTION_KEYWORDS:
-        if kw in query_text:
-            return "attraction"
-    for kw in TICKET_KEYWORDS:
-        if kw in query_text:
-            return "ticket"
+    if any(kw in query_text for kw in ITINERARY_KEYWORDS):
+        return "itinerary"
+    if any(kw in query_text for kw in FOOD_KEYWORDS):
+        return "food"
+    if any(kw in query_text for kw in HOTEL_KEYWORDS):
+        return "hotel"
+    if any(kw in query_text for kw in ATTRACTION_KEYWORDS):
+        return "attraction"
+    if any(kw in query_text for kw in TICKET_KEYWORDS):
+        return "ticket"
     return "general"
 
 
+# =====================
+# 链接处理
+# =====================
+
 def wrap_link(name: str, raw_url: str) -> str:
-    """将美团/大众点评链接包装为跳转链接"""
     if not raw_url:
         return name
     url = raw_url.strip()
@@ -80,214 +121,150 @@ def wrap_link(name: str, raw_url: str) -> str:
 
 
 def process_links_in_text(text: str) -> str:
-    """处理文本中所有美团/点评链接，替换为 Markdown 链接格式"""
-    # 匹配 [名称](url) 格式
     def replace_link(match):
         name = match.group(1).strip()
         url = match.group(2).strip()
         return wrap_link(name, url)
+    return re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', replace_link, text)
 
-    # 处理 Markdown 链接格式 [text](url)
-    text = re.sub(r'\[([^\]]+)\]\((https?://[^\)]+)\)', replace_link, text)
-    return text
 
+# =====================
+# 格式化输出
+# =====================
 
 def format_itinerary(content: str, city: str) -> str:
-    """格式化行程规划输出"""
     lines = content.split("\n")
     output = []
     in_day = False
     prev_empty = True
-
     for line in lines:
         stripped = line.strip()
         if not stripped:
             prev_empty = True
             output.append("")
             continue
-
-        # 标题行（如 "📝 DAY1：..." 或 "📝 Day 1"）
-        if re.match(r"^📝\s*DAY", stripped, re.IGNORECASE) or \
-           re.match(r"^DAY", stripped, re.IGNORECASE):
+        if re.match(r"^📝\s*DAY", stripped, re.IGNORECASE) or re.match(r"^DAY", stripped, re.IGNORECASE):
             if not prev_empty:
                 output.append("")
             output.append(f"\n{stripped}")
             prev_empty = False
             in_day = True
             continue
-
-        # 景点/活动行（以 · 或 - 开头）
-        if (stripped.startswith("·") or stripped.startswith("-") or \
-            stripped.startswith("*")) and in_day:
+        if (stripped.startswith("·") or stripped.startswith("-") or stripped.startswith("*")) and in_day:
             output.append(f"  {stripped}")
             prev_empty = False
             continue
-
-        # 景点名称 + 描述（独立成行的景点行）
-        if re.match(r"^[\u4e00-\u9fa5]{2,10}(\s|$)", stripped) and \
-           len(stripped) < 50 and not prev_empty:
+        if re.match(r"^[\u4e00-\u9fa5]{2,10}(\s|$)", stripped) and len(stripped) < 50 and not prev_empty:
             output.append(f"  {stripped}")
             prev_empty = False
             continue
-
-        # 普通段落
         if prev_empty and len(stripped) > 5:
             output.append(f"\n{stripped}")
         else:
             output.append(stripped)
         prev_empty = False
-
-    result = "\n".join(output)
-    result = process_links_in_text(result)
-    return result.strip()
+    return process_links_in_text("\n".join(output)).strip()
 
 
 def format_attraction(content: str) -> str:
-    """格式化景点推荐输出"""
     lines = content.split("\n")
     output = []
     prev_empty = True
-
     for line in lines:
         stripped = line.strip()
         if not stripped:
             prev_empty = True
             continue
-
-        # 链接行：[景点名](url)
         link_match = re.match(r"\[([^\]]+)\]\((https?://[^\)]+)\)", stripped)
         if link_match:
             name = link_match.group(1).strip()
             url = link_match.group(2).strip()
-            wrapped = wrap_link(name, url)
-            output.append(f"  {wrapped}")
+            output.append(f"  {wrap_link(name, url)}")
             prev_empty = False
             continue
-
-        # 评分行（包含 ⭐ 或 评分）
         if "⭐" in stripped or "评分" in stripped:
             output.append(f"  {stripped}")
             prev_empty = False
             continue
-
-        # 简介行
         if len(stripped) > 10 and prev_empty:
             output.append(f"\n{stripped}")
             prev_empty = False
             continue
-
-        # 小贴士
         if "小贴士" in stripped or "贴士" in stripped:
             output.append(f"\n{stripped}")
             prev_empty = True
             continue
-
         output.append(f"  {stripped}")
         prev_empty = False
-
-    result = "\n".join(output)
-    result = process_links_in_text(result)
-    return result.strip()
+    return process_links_in_text("\n".join(output)).strip()
 
 
 def format_hotel(content: str) -> str:
-    """格式化酒店推荐输出"""
     lines = content.split("\n")
     output = []
     prev_empty = True
-
     for line in lines:
         stripped = line.strip()
         if not stripped:
             prev_empty = True
             continue
-
-        # 方案/推荐行
-        if stripped.startswith("方案") or stripped.startswith("推荐") or \
-           stripped.startswith("酒店"):
+        if stripped.startswith("方案") or stripped.startswith("推荐") or stripped.startswith("酒店"):
             output.append(f"\n{stripped}")
             prev_empty = False
             continue
-
-        # 链接行
         link_match = re.match(r"\[([^\]]+)\]\((https?://[^\)]+)\)", stripped)
         if link_match:
             name = link_match.group(1).strip()
             url = link_match.group(2).strip()
-            wrapped = wrap_link(name, url)
-            output.append(f"  {wrapped}")
+            output.append(f"  {wrap_link(name, url)}")
             prev_empty = False
             continue
-
-        # 详情行
-        if "评分" in stripped or "价格" in stripped or "起" in stripped or \
-           "星级" in stripped or "距离" in stripped:
+        if "评分" in stripped or "价格" in stripped or "起" in stripped or "星级" in stripped or "距离" in stripped:
             output.append(f"  {stripped}")
             prev_empty = False
             continue
-
-        # 分割线/小贴士
         if "小贴士" in stripped or "---" in stripped:
             output.append(f"\n{stripped}")
             prev_empty = True
             continue
-
         if len(stripped) > 5:
             output.append(f"  {stripped}")
         prev_empty = False
-
-    result = "\n".join(output)
-    result = process_links_in_text(result)
-    return result.strip()
+    return process_links_in_text("\n".join(output)).strip()
 
 
 def format_food(content: str) -> str:
-    """格式化美食推荐输出"""
     lines = content.split("\n")
     output = []
     prev_empty = True
-
     for line in lines:
         stripped = line.strip()
         if not stripped:
             prev_empty = True
             continue
-
-        # 链接行
         link_match = re.match(r"\[([^\]]+)\]\((https?://[^\)]+)\)", stripped)
         if link_match:
             name = link_match.group(1).strip()
             url = link_match.group(2).strip()
-            wrapped = wrap_link(name, url)
-            output.append(f"  {wrapped}")
+            output.append(f"  {wrap_link(name, url)}")
             prev_empty = False
             continue
-
-        # 分割线/小贴士
         if "小贴士" in stripped or "---" in stripped:
             output.append(f"\n{stripped}")
             prev_empty = True
             continue
-
         if len(stripped) > 5:
             output.append(f"  {stripped}")
         prev_empty = False
-
-    result = "\n".join(output)
-    result = process_links_in_text(result)
-    return result.strip()
+    return process_links_in_text("\n".join(output)).strip()
 
 
 def format_general(content: str) -> str:
-    """通用格式化：处理链接 + 清理"""
-    result = process_links_in_text(content)
-    return result.strip()
+    return process_links_in_text(content).strip()
 
 
 def format_output(content: str, query_text: str) -> str:
-    """根据 query 类型自动选择格式化器"""
     qtype = classify_query(query_text)
-
     if qtype == "itinerary":
         return format_itinerary(content, "")
     elif qtype == "hotel":
@@ -300,7 +277,11 @@ def format_output(content: str, query_text: str) -> str:
         return format_general(content)
 
 
-def query(city: str, city_id: int, query_text: str) -> dict:
+# =====================
+# API 查询
+# =====================
+
+def query(city: str, city_id: int, query_text: str, token: str) -> dict:
     payload = {
         "xtDebugCellName": "gray-release-hotel-ai-distill",
         "userId": 214900659,
@@ -309,7 +290,7 @@ def query(city: str, city_id: int, query_text: str) -> dict:
         "query": query_text,
     }
     headers = {
-        "Authorization": AUTH_TOKEN,
+        "Authorization": token,
         "Content-Type": "application/json",
     }
     req = urllib.request.Request(
@@ -325,43 +306,90 @@ def query(city: str, city_id: int, query_text: str) -> dict:
         return {"code": -1, "msg": str(e)}
 
 
+# =====================
+# Token 子命令
+# =====================
+
+def cmd_token(argv: list):
+    """处理 token 子命令"""
+    if not argv:
+        print("用法: travel token [set|show|clear]")
+        return
+    action = argv[0]
+    if action == "set":
+        if len(argv) < 2:
+            print("❌ 请提供 Token 值: travel token set <token>")
+            sys.exit(1)
+        save_token(argv[1])
+        print(f"✅ Token 已保存至 {TOKEN_FILE}")
+    elif action == "show":
+        token = load_token()
+        if token:
+            print(f"当前 Token: {token}")
+        else:
+            print("未设置 Token，请先注册: " + TOKEN_URL)
+    elif action == "clear":
+        clear_token()
+        print("✅ Token 已清除")
+    else:
+        print(f"未知 token 操作: {action}")
+        print("用法: travel token [set|show|clear]")
+
+
+# =====================
+# 主程序
+# =====================
+
 def main():
+    # 手动解析第一个参数判断是否是 token 子命令
+    if len(sys.argv) >= 2 and sys.argv[1] == "token":
+        cmd_token(sys.argv[2:])
+        return
+
+    # 正常查询流程
     parser = argparse.ArgumentParser(
         prog="travel",
         description="旅行助手 CLI - 酒店、景点、行程、火车票查询",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-城市ID参考:
-  北京 110100 | 上海 310100 | 杭州 330100 | 广州 440100
-  深圳 440300 | 成都 510100 | 南京 320100 | 重庆 500100
-  西安 610100 | 天津 120100 | 石家庄 130100 | 昆明 530100
-  三亚 460200 | 大理 532900 | 丽江 530700 | 桂林 450300
-
 示例:
-  travel --city 北京 --query "天安门附近酒店"
-  travel --city 上海 --query "外滩五星级酒店推荐"
-  travel --city 昆明 --query "3日游行程规划"
-  travel --city 北京 --query "北京到上海高铁"
-  travel --city 北京 --query "故宫门票多少钱"
-  travel --city 北京 --query "北京必去景点推荐"
-  travel --city 石家庄 --query "石家庄亲子游推荐"
-  travel --city 丽江 --query "丽江必吃美食餐厅推荐"
-  travel --json --city 北京 --query "天安门附近酒店"
+  travel -c 北京 -q "天安门附近酒店"
+  travel -c 上海 -q "外滩五星级酒店推荐"
+  travel -c 昆明 -q "3日游行程规划"
+  travel -c 北京 -q "北京到上海高铁"
+  travel -c 北京 -q "故宫门票多少钱"
+  travel -c 北京 -q "北京必去景点推荐"
+  travel -c 石家庄 -q "石家庄亲子游推荐"
+  travel -c 丽江 -q "丽江必吃美食餐厅推荐"
+  travel --json -c 北京 -q "天安门附近酒店"
+
+Token 管理:
+  travel token set <your-token>  # 设置 Token
+  travel token show              # 查看当前 Token
+  travel token clear             # 清除 Token
+
+首次使用请先注册 Token: https://developer.sjst.st.sankuai.com/zh/v2/dev/token
         """,
     )
     parser.add_argument("--city", "-c", required=True, help="目标城市")
     parser.add_argument("--city-id", type=int, default=None, help="城市 ID（可选）")
     parser.add_argument("--query", "-q", required=True, help="查询内容")
-    parser.add_argument(
-        "--json", "-j", action="store_true", help="输出原始 JSON"
-    )
+    parser.add_argument("--json", "-j", action="store_true", help="输出原始 JSON")
 
     args = parser.parse_args()
-    city_id = args.city_id or CITY_IDS.get(args.city)
 
+    # 检查 Token
+    token = load_token()
+    if not token:
+        print("❌ 未设置 Token，请先注册并设置：", file=sys.stderr)
+        print(f"   1. 访问 {TOKEN_URL} 注册获取 Token", file=sys.stderr)
+        print(f"   2. 运行: travel token set <your-token>", file=sys.stderr)
+        sys.exit(1)
+
+    city_id = args.city_id or CITY_IDS.get(args.city)
     print(f"🔍 查询中: {args.city} - {args.query}", file=sys.stderr)
 
-    result = query(args.city, city_id, args.query)
+    result = query(args.city, city_id, args.query, token)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
@@ -372,8 +400,7 @@ def main():
         if not content:
             print("⚠️ 未返回数据", file=sys.stderr)
             sys.exit(1)
-        formatted = format_output(content, args.query)
-        print(formatted)
+        print(format_output(content, args.query))
 
 
 if __name__ == "__main__":
