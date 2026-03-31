@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #===============================================
 # Travel Assistant CLI - GitHub 一键安装脚本
-# 使用方式: 
+# 使用方式:
 #   curl -sSL https://raw.githubusercontent.com/Yuzhao163/travel-assistant-cli/main/install.sh | bash
 #   或
 #   bash <(curl -sSL https://raw.githubusercontent.com/Yuzhao163/travel-assistant-cli/main/install.sh)
@@ -47,11 +47,22 @@ if ! command -v pip3 &> /dev/null; then
 fi
 echo "✅ pip3 已安装"
 
-# 安装依赖
-echo ""
-echo "📦 安装 Python 依赖..."
-pip3 install requests urllib3 --break-system-packages 2>/dev/null || pip3 install requests urllib3
-echo "✅ 依赖安装完成"
+# 检查 requests/urllib3 是否已安装（已安装则跳过）
+CHECK_PYTHON=$(python3 -c "import requests; import urllib3; print('OK')" 2>/dev/null || true)
+if [[ "$CHECK_PYTHON" == "OK" ]]; then
+    echo "✅ Python 依赖已满足，跳过安装"
+else
+    # 尝试用 python3 -m pip 安装（更可靠）
+    echo "📦 安装 Python 依赖..."
+    if ! python3 -m pip install requests urllib3 --break-system-packages 2>/dev/null; then
+        if ! pip3 install requests urllib3 --break-system-packages 2>/dev/null; then
+            if ! python3 -m pip install requests urllib3 2>/dev/null; then
+                pip3 install requests urllib3
+            fi
+        fi
+    fi
+    echo "✅ 依赖安装完成"
+fi
 
 # 下载 travel 脚本和 SKILL.md
 echo ""
@@ -60,15 +71,17 @@ curl -sSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/travel" -o "${TEM
 chmod +x "${TEMP_DIR}/travel"
 
 echo "📥 下载 SKILL.md..."
-curl -sSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/SKILL.md" -o "${TEMP_DIR}/SKILL.md"
+curl -sSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/SKILL.md" -o "${TEMP_DIR}/SKILL.md" || true
 
 # 创建安装目录
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$HOME/.openclaw/skills/travel-assistant"
 
-# 复制脚本
+# 复制文件
 cp "${TEMP_DIR}/travel" "${INSTALL_DIR}/travel"
-cp "${TEMP_DIR}/SKILL.md" "$HOME/.openclaw/skills/travel-assistant/SKILL.md"
+if [[ -f "${TEMP_DIR}/SKILL.md" ]]; then
+    cp "${TEMP_DIR}/SKILL.md" "$HOME/.openclaw/skills/travel-assistant/SKILL.md"
+fi
 
 # 清理
 rm -rf "$TEMP_DIR"
@@ -80,11 +93,13 @@ echo "========================================"
 echo ""
 echo "📍 安装路径: ${INSTALL_DIR}/travel"
 echo ""
+echo "📝 首次使用 - 设置 Token:"
+echo "   1. 访问 https://developer.sjst.st.sankuai.com/zh/v2/dev/token 注册"
+echo "   2. travel token set <your-token>"
+echo ""
 echo "📝 用法示例:"
 echo "   travel -c 北京 -q '天安门附近酒店'"
-echo "   travel -c 上海 -q '外滩五星级酒店'"
 echo "   travel -c 昆明 -q '3日游行程规划'"
-echo "   travel -c 北京 -q '北京到上海高铁'"
 echo ""
 
 # 检查 PATH
